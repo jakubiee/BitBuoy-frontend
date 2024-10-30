@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
-import { format } from "date-fns";
+import React, { useState, useEffect } from "react";
 import { Calendar } from "@/components/ui/calendar";
 import { Calendar as CalendarIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { format, isBefore, subHours } from "date-fns";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,56 +54,87 @@ type MeasurementData = {
   timestamp: Date;
 };
 
-const mockData: MeasurementData[] = [
-  {
-    buoy_serial_number: "B001",
-    ambient_temp: 25.5,
-    water_temp: 20.3,
-    water_pollution: 0.05,
-    humidity: 65,
-    lat: 40.7128,
-    long: -74.006,
-    timestamp: new Date("2023-04-01T12:00:00Z"),
-  },
-  {
-    buoy_serial_number: "B001",
-    ambient_temp: 26.2,
-    water_temp: 20.5,
-    water_pollution: 0.06,
-    humidity: 63,
-    lat: 40.7128,
-    long: -74.006,
-    timestamp: new Date("2023-04-01T13:00:00Z"),
-  },
-  {
-    buoy_serial_number: "B001",
-    ambient_temp: 26.8,
-    water_temp: 20.7,
-    water_pollution: 0.04,
-    humidity: 62,
-    lat: 40.7128,
-    long: -74.006,
-    timestamp: new Date("2023-04-01T14:00:00Z"),
-  },
-];
+type Buoy = {
+  serial_number: string;
+  last_measurement_timestamp: Date | null;
+  latitude: number | null;
+  longitude: number | null;
+};
 
-const buoys = ["B001", "B002", "B003", "B004", "B005"];
+type BuoyResponse = {
+  userId: number;
+  buoys: Buoy[];
+};
 
 export default function Dashboard() {
+  const [buoyData, setBuoyData] = useState<Buoy[]>([]);
+  const [measurements, setMeasurements] = useState<MeasurementData[]>([]);
   const [selectedBuoys, setSelectedBuoys] = useState<string[]>([]);
-  const [dateRange, setDateRange] = useState<{
-    from: Date | undefined;
-    to: Date | undefined;
-  }>({
-    from: undefined,
-    to: undefined,
-  });
 
-  const toggleBuoy = (buoy: string) => {
+  const fetchBuoys = async () => {
+    try {
+      const response = await fetch(
+        'https://bitbuoy-backend-production.up.railway.app/user/1/buoys',
+        {
+          headers: {
+            'accept': 'application/json',
+            'token': 'securetoken123',
+          },
+        }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setBuoyData(data.buoys);
+      } else {
+        console.error('Failed to fetch buoy data');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+    }
+  };
+
+  const fetchMeasurements = async () => {
+    try {
+      const serialNumbers = selectedBuoys.join(",");
+      const response = await fetch(
+        `https://bitbuoy-backend-production.up.railway.app/measurements/?serial_numbers=${serialNumbers}`,
+        {
+          method: "POST",
+          headers: {
+            accept: "application/json",
+            token: "securetoken123",
+          },
+        }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setMeasurements(data);
+      } else {
+        console.error("Failed to fetch measurement data");
+      }
+    } catch (error) {
+      console.error("Error:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedBuoys.length > 0) {
+      fetchMeasurements();
+    }
+  }, [selectedBuoys]);
+  useEffect(() => {
+    fetchBuoys();
+  }, []);
+
+  const toggleBuoy = (serialNumber: string) => {
     setSelectedBuoys((prev) =>
-      prev.includes(buoy) ? prev.filter((b) => b !== buoy) : [...prev, buoy]
+      prev.includes(serialNumber)
+        ? prev.filter((id) => id !== serialNumber)
+        : [...prev, serialNumber]
     );
   };
+
+  console.log(buoyData);
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
@@ -139,197 +170,163 @@ export default function Dashboard() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline">
-              {selectedBuoys.length > 0
+              {buoyData.length > 0
                 ? `${selectedBuoys.length} Buoys Selected`
                 : "Select Buoys"}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent>
-            {buoys.map((buoy) => (
-              <DropdownMenuCheckboxItem
-                key={buoy}
-                checked={selectedBuoys.includes(buoy)}
-                onCheckedChange={() => toggleBuoy(buoy)}
-              >
-                Buoy {buoy}
-              </DropdownMenuCheckboxItem>
-            ))}
-          </DropdownMenuContent>
+        {buoyData.map((buoy) => (
+          <DropdownMenuCheckboxItem
+            key={buoy.serial_number}
+            checked={selectedBuoys.includes(buoy.serial_number)}
+            onCheckedChange={() => toggleBuoy(buoy.serial_number)}
+          >
+            {buoy.serial_number}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
         </DropdownMenu>
 
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              variant={"outline"}
-              className={cn(
-                "w-[280px] justify-start text-left font-normal",
-                !dateRange && "text-muted-foreground"
-              )}
-            >
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {dateRange?.from ? (
-                dateRange.to ? (
-                  <>
-                    {format(dateRange.from, "LLL dd, y")} -{" "}
-                    {format(dateRange.to, "LLL dd, y")}
-                  </>
-                ) : (
-                  format(dateRange.from, "LLL dd, y")
-                )
-              ) : (
-                <span>Pick a date</span>
-              )}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0">
-            <Calendar
-              initialFocus
-              mode="range"
-              defaultMonth={dateRange?.from}
-              selected={dateRange}
-              onSelect={(range) =>
-                setDateRange({ from: range?.from, to: range?.to })
-              }
-              numberOfMonths={2}
-            />
-          </PopoverContent>
-        </Popover>
       </div>
 
       <div className="flex flex-1 p-4 space-x-4 overflow-hidden">
         <div className="w-[60%] space-y-4 overflow-auto pr-4">
-          <Card className="h-1/4">
-            <CardHeader>
-              <CardTitle>Ambient Temperature</CardTitle>
-            </CardHeader>
-            <CardContent className="h-[calc(100%-4rem)]">
-              <ChartContainer
-                config={{
-                  ambient_temp: {
-                    label: "Ambient Temperature",
-                    color: "hsl(var(--chart-1))",
-                  },
-                }}
-                className="h-full w-full"
-              >
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={mockData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="timestamp"
-                      tickFormatter={(value) => format(new Date(value), "HH:mm")}
-                    />
-                    <YAxis />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <Line
-                      type="monotone"
-                      dataKey="ambient_temp"
-                      stroke="var(--color-ambient_temp)"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </ChartContainer>
-            </CardContent>
-          </Card>
-          <Card className="h-1/4">
-            <CardHeader>
-              <CardTitle>Water Temperature</CardTitle>
-            </CardHeader>
-            <CardContent className="h-[calc(100%-4rem)]">
-              <ChartContainer
-                config={{
-                  water_temp: {
-                    label: "Water Temperature",
-                    color: "hsl(var(--chart-2))",
-                  },
-                }}
-                className="h-full w-full"
-              >
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={mockData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="timestamp"
-                      tickFormatter={(value) => format(new Date(value), "HH:mm")}
-                    />
-                    <YAxis />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <Line
-                      type="monotone"
-                      dataKey="water_temp"
-                      stroke="var(--color-water_temp)"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </ChartContainer>
-            </CardContent>
-          </Card>
-          <Card className="h-1/4">
-            <CardHeader>
-              <CardTitle>Water Pollution</CardTitle>
-            </CardHeader>
-            <CardContent className="h-[calc(100%-4rem)]">
-              <ChartContainer
-                config={{
-                  water_pollution: {
-                    label: "Water Pollution",
-                    color: "hsl(var(--chart-3))",
-                  },
-                }}
-                className="h-full w-full"
-              >
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={mockData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="timestamp"
-                      tickFormatter={(value) => format(new Date(value), "HH:mm")}
-                    />
-                    <YAxis />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <Line
-                      type="monotone"
-                      dataKey="water_pollution"
-                      stroke="var(--color-water_pollution)"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </ChartContainer>
-            </CardContent>
-          </Card>
-          <Card className="h-1/4">
-            <CardHeader>
-              <CardTitle>Humidity</CardTitle>
-            </CardHeader>
-            <CardContent className="h-[calc(100%-4rem)]">
-              <ChartContainer
-                config={{
-                  humidity: {
-                    label: "Humidity",
-                    color: "hsl(var(--chart-4))",
-                  },
-                }}
-                className="h-full w-full"
-              >
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={mockData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="timestamp"
-                      tickFormatter={(value) => format(new Date(value), "HH:mm")}
-                    />
-                    <YAxis />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <Line
-                      type="monotone"
-                      dataKey="humidity"
-                      stroke="var(--color-humidity)"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </ChartContainer>
-            </CardContent>
-          </Card>
+            <Card className="h-1/4">
+        <CardHeader>
+          <CardTitle>Ambient Temperature</CardTitle>
+        </CardHeader>
+        <CardContent className="h-[calc(100%-4rem)]">
+          <ChartContainer
+            config={{
+              ambient_temp: {
+                label: "Ambient Temperature",
+                color: "hsl(var(--chart-1))",
+              },
+            }}
+            className="h-full w-full"
+          >
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={measurements}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="timestamp"
+                  tickFormatter={(value) => format(new Date(value), "HH:mm")}
+                />
+                <YAxis />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <Line
+                  type="monotone"
+                  dataKey="ambient_temp"
+                  stroke="var(--color-ambient_temp)"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </ChartContainer>
+        </CardContent>
+      </Card>
+
+      <Card className="h-1/4">
+        <CardHeader>
+          <CardTitle>Water Temperature</CardTitle>
+        </CardHeader>
+        <CardContent className="h-[calc(100%-4rem)]">
+          <ChartContainer
+            config={{
+              water_temp: {
+                label: "Water Temperature",
+                color: "hsl(var(--chart-2))",
+              },
+            }}
+            className="h-full w-full"
+          >
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={measurements}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="timestamp"
+                  tickFormatter={(value) => format(new Date(value), "HH:mm")}
+                />
+                <YAxis />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <Line
+                  type="monotone"
+                  dataKey="water_temp"
+                  stroke="var(--color-water_temp)"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </ChartContainer>
+        </CardContent>
+      </Card>
+
+      <Card className="h-1/4">
+        <CardHeader>
+          <CardTitle>Water Pollution</CardTitle>
+        </CardHeader>
+        <CardContent className="h-[calc(100%-4rem)]">
+          <ChartContainer
+            config={{
+              water_pollution: {
+                label: "Water Pollution",
+                color: "hsl(var(--chart-3))",
+              },
+            }}
+            className="h-full w-full"
+          >
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={measurements}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="timestamp"
+                  tickFormatter={(value) => format(new Date(value), "HH:mm")}
+                />
+                <YAxis />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <Line
+                  type="monotone"
+                  dataKey="water_pollution"
+                  stroke="var(--color-water_pollution)"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </ChartContainer>
+        </CardContent>
+      </Card>
+
+      <Card className="h-1/4">
+        <CardHeader>
+          <CardTitle>Humidity</CardTitle>
+        </CardHeader>
+        <CardContent className="h-[calc(100%-4rem)]">
+          <ChartContainer
+            config={{
+              humidity: {
+                label: "Humidity",
+                color: "hsl(var(--chart-4))",
+              },
+            }}
+            className="h-full w-full"
+          >
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={measurements}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="timestamp"
+                  tickFormatter={(value) => format(new Date(value), "HH:mm")}
+                />
+                <YAxis />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <Line
+                  type="monotone"
+                  dataKey="humidity"
+                  stroke="var(--color-humidity)"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </ChartContainer>
+        </CardContent>
+      </Card>
         </div>
 
         <div className="w-[40%] space-y-4 overflow-hidden flex flex-col">
@@ -338,40 +335,49 @@ export default function Dashboard() {
               <CardTitle>Map</CardTitle>
             </CardHeader>
             <CardContent className="h-[calc(100%-4rem)]">
-              <MapComponent />
+              <MapComponent buoyData={buoyData} />
             </CardContent>
           </Card>
           <Card className="flex-1">
-            <CardHeader>
-              <CardTitle>Buoys</CardTitle>
-            </CardHeader>
-            <CardContent className="h-[calc(100%-4rem)] overflow-auto">
-              {buoys.map((buoy) => (
-                <Button
-                  key={buoy}
-                  variant="ghost"
-                  className="w-full justify-start mb-2"
-                  onClick={() => toggleBuoy(buoy)}
-                >
-                  <div className="flex items-center">
-                    <div
-                      className={`w-2 h-2 rounded-full ${
-                        selectedBuoys.includes(buoy)
-                          ? "bg-green-500"
-                          : "bg-gray-300"
-                      } mr-2`}
-                    />
-                    <div>
-                      <p className="text-left font-medium">Buoy {buoy}</p>
-                      <p className="text-left text-sm text-muted-foreground">
-                        Last active: {format(new Date(), "PPpp")}
-                      </p>
-                    </div>
-                  </div>
-                </Button>
-              ))}
-            </CardContent>
-          </Card>
+      <CardHeader>
+        <CardTitle>Buoys</CardTitle>
+      </CardHeader>
+      <CardContent className="h-[calc(100%-4rem)] overflow-auto">
+        {buoyData.map((buoy) => {
+          const isActive = buoy.last_measurement_timestamp
+          ? isBefore(
+              subHours(new Date().toISOString(), 2), 
+              new Date(buoy.last_measurement_timestamp).toISOString()
+            )
+          : false;
+
+          return (
+            <Button
+              key={buoy.serial_number}
+              variant="ghost"
+              className="w-full justify-start mb-2"
+            >
+              <div className="flex items-center">
+                <div
+                  className={`w-2 h-2 rounded-full ${
+                    isActive ? "bg-green-500" : "bg-gray-300"
+                  } mr-2`}
+                />
+                <div>
+                  <p className="text-left font-medium">{buoy.serial_number}</p>
+                  <p className="text-left text-sm text-muted-foreground">
+                    Last active:{" "}
+                    {buoy.last_measurement_timestamp
+                      ? format(new Date(buoy.last_measurement_timestamp), "PPpp")
+                      : "No data"}
+                  </p>
+                </div>
+              </div>
+            </Button>
+          );
+        })}
+      </CardContent>
+    </Card>
         </div>
       </div>
     </div>
